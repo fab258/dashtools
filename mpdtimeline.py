@@ -73,26 +73,36 @@ def parseMPDData(mpdLines):
             if "<SegmentTemplate" in mpdLine: 
                 timescale = int(getAttrValue("timescale",mpdLine))   
                 presentationTimeOffset =  int(getAttrValue("presentationTimeOffset",mpdLine))
-                print("P%02d - AS%02d - SegmentTemplate: timescale:%s presentationTimeOffset:%s - %s" % (
+                last_t = presentationTimeOffset
+                print("P%02d - AS%02d - SegmentTemplate: timescale:%s presentationTimeOffset:%s - %s (Wall:%s)" % (
                     periodIndex,
                     adaptationSetIndex,
                     timescale,
-                    presentationTimeOffset, datetime.timedelta(seconds=presentationTimeOffset/timescale)))
+                    presentationTimeOffset, datetime.timedelta(seconds=presentationTimeOffset/timescale),
+                    availabilityStartTime+datetime.timedelta(seconds=presentationTimeOffset/timescale)+period_start)) # This wall time doesn't mean something
             if "<S " in mpdLine:
-                t = datetime.timedelta(0)
+                t = 0
                 d = -1
                 r = 1
                 if ' t="' in mpdLine: 
                     t = int(getAttrValue("t",mpdLine))
+                else:
+                    t = last_t
                 if ' d="' in mpdLine: 
                     d = int(getAttrValue("d",mpdLine))
                 if ' r="' in mpdLine:  
                     r = int(getAttrValue("r",mpdLine))
-                print("P%02d - AS%02d - Segment: t:%s d:%s r:%d" % (
+                print("P%02d - AS%02d - Segment: t:%s - %s d:%s - %s r:%d Wall:%s" % (
                     periodIndex,
-                    adaptationSetIndex,t,d,r) )
+                    adaptationSetIndex,
+                    t,datetime.timedelta(seconds=t/timescale),
+                    d,datetime.timedelta(seconds=d/timescale),
+                    r,
+                    availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start,
+                    ))
+                last_t = t + d
         except Exception as ex:
-            raise Exception("Failed to parse line '%s'. %s" % (mpdLine, ex))
+            raise Exception("Failed to parse line '%s'.l.%s - %s" % (mpdLine, sys.exc_info()[2].tb_lineno, ex))
 
 
 def main():
