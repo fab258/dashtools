@@ -59,6 +59,25 @@ def getInlineOutput(dt,s):
     #return "%s; %s" % (dt.isoformat(timespec='microseconds'),s)
     return "%s; %s" % (dt.strftime('%Y-%m-%d T %H:%M:%S.%f'),s)
 
+def expandRepetition(mpdLines):
+    """
+    Return a new array of mpd line with segment repetition expanded in
+    """
+    mpdLinesExpanded = []
+    for mpdLine in mpdLines:
+        if "<S " in mpdLine and ' r="' in mpdLine:
+            r = int(getAttrValue("r",mpdLine))
+            if r > 1:
+                # Segment repetition S@r=5 means 6 segments, 1 + 5 repetitions
+                mpdLinesExpanded.append('%s <!-- r="%d" removed -->' % (re.sub(r'r="\d+\"',"",mpdLine),r))
+                newSegmentBaseLine = re.sub(r'r="\d+\"',"",mpdLine) # remove repetition
+                newSegmentBaseLine = re.sub(r't="\d+\"',"",newSegmentBaseLine)    
+                for segment_count in range(1,r+1):
+                    mpdLinesExpanded.append("%s <!--simulate segment r %d -->" % (re.sub(r'r="\d+\"',"",newSegmentBaseLine),segment_count))
+        else:
+            mpdLinesExpanded.append(mpdLine)
+    return mpdLinesExpanded
+
 def parseMPDData(mpdLines,outputMode="log"):
     """
     Parse MPD Data receive in an array, one line per item
@@ -71,7 +90,7 @@ def parseMPDData(mpdLines,outputMode="log"):
     periodIndex = -1
     adaptationSetIndex = -1
     currentWallTime = datetime.datetime.now()    
-    for mpdLine in mpdLines: 
+    for mpdLine in expandRepetition(mpdLines): 
         try:
             #print("mpdtimeline.py::main - '%s'" % (mpdLine))
             log = None
@@ -118,6 +137,8 @@ def parseMPDData(mpdLines,outputMode="log"):
                     d = int(getAttrValue("d",mpdLine))
                 if ' r="' in mpdLine:  
                     r = int(getAttrValue("r",mpdLine))
+                    #if r > 1:
+                    #    raise Exception("Segment repetition should be expanded")
                 log = "P%02d - AS%02d - Segment: t:%s - %s d:%s - %s r:%d Wall:%s" % (
                     periodIndex,
                     adaptationSetIndex,
