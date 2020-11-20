@@ -4,7 +4,7 @@
 Raw parsing of a dash mpd to display human readable timing info
 The script does not go into xml and loading data, it is sequential
 
-$ python3 mpdtimeline.py -f filename.mpd
+$ python3 mpdtimeline.py -f filename.mpd -o [inline/log]
 
 pip install python-dateutil
 pip install isodate
@@ -12,6 +12,10 @@ pip install isodate
 Essential info about mpd timing model :
 https://github.com/google/shaka-player/blob/master/docs/design/dash-manifests.md
 https://dashif-documents.azurewebsites.net/Guidelines-TimingModel/master/Guidelines-TimingModel.html
+
+MPD to test : https://github.com/Dash-Industry-Forum/dash-live-source-simulator/wiki/Test-URLs
+
+$ GET http://livesim.dashif.org/livesim/testpic_2s/Manifest.mpd | python3 mpdtimeline.py -o inline
 
 
 TODO: support of suggestedPresentationDelay ? 
@@ -90,6 +94,7 @@ def parseMPDData(mpdLines,outputMode="log"):
     periodIndex = -1
     adaptationSetIndex = -1
     currentWallTime = datetime.datetime.now()    
+    timescale = 1 # Missing timescale should not happen on a real stream, so possibly let the error if not found ? 
     for mpdLine in expandRepetition(mpdLines): 
         try:
             #print("mpdtimeline.py::main - '%s'" % (mpdLine))
@@ -114,7 +119,11 @@ def parseMPDData(mpdLines,outputMode="log"):
             if "<AdaptationSet" in mpdLine: 
                 adaptationSetIndex = adaptationSetIndex + 1
             if "<SegmentTemplate" in mpdLine: 
-                timescale = int(getAttrValue("timescale",mpdLine))
+                if "timescale" in mpdLine:
+                    timescale = int(getAttrValue("timescale",mpdLine))
+                else:
+                    # should raise an exception here, timescale of 1 second is not possible
+                    pass
                 if "presentationTimeOffset" in mpdLine:
                     presentationTimeOffset =  int(getAttrValue("presentationTimeOffset",mpdLine))
                 else:
@@ -177,6 +186,8 @@ def main():
     if '-f' in sys.argv:
         mpdFilename = sys.argv[sys.argv.index('-f')+1]
         parseMPDFile(mpdFilename,outputMode)
+    else:
+        parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode)
  
     print("mpdtimeline.py::main - End.")
     return
