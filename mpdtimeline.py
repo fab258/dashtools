@@ -4,7 +4,7 @@
 Raw parsing of a dash mpd to display human readable timing info
 The script does not go into xml and loading data, it is sequential
 
-$ python3 mpdtimeline.py -f filename.mpd -o [inline/log]
+$ python3 mpdtimeline.py [-f filename.mpd] [-o (inline/log)] [-url RepresentationID]
 
 pip install python-dateutil
 pip install isodate
@@ -40,7 +40,7 @@ def cleanmystring(s):
 def getAttrValue(attrName,line):
     return re.search('%s="([^\"]*)"' % attrName,line)[1]
 
-def parseMPDFile(mpdFilename,outputMode="log"):
+def parseMPDFile(mpdFilename,outputMode="log",reprIdForURL=None):
     """
     Parse MPD data from a file
     File must be indented
@@ -82,12 +82,13 @@ def expandRepetition(mpdLines):
             mpdLinesExpanded.append(mpdLine)
     return mpdLinesExpanded
 
-def parseMPDData(mpdLines,outputMode="log"):
+def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
     """
     Parse MPD Data receive in an array, one line per item
 
         mpdLines - Array of lines from the mpd
         outputMode - Outmode mode. log (default) or inline to add wall clock label to the mpd
+        reprIdForURL - string - If not None then the output will include the segment url based on this RepresentationID
 
     """
     availabilityStartTime = None
@@ -95,6 +96,8 @@ def parseMPDData(mpdLines,outputMode="log"):
     adaptationSetIndex = -1
     currentWallTime = datetime.datetime.now()    
     timescale = 1 # Missing timescale should not happen on a real stream, so possibly let the error if not found ? 
+    segment_url = None
+    baseUrl = ""
     for mpdLine in expandRepetition(mpdLines): 
         try:
             #print("mpdtimeline.py::main - '%s'" % (mpdLine))
@@ -118,7 +121,18 @@ def parseMPDData(mpdLines,outputMode="log"):
                 currentWallTime = availabilityStartTime+period_start
             if "<AdaptationSet" in mpdLine: 
                 adaptationSetIndex = adaptationSetIndex + 1
+            if "<BaseURL" in mpdLine:
+                baseUrl = re.search (r"<BaseURL>(.*)<\/BaseURL",mpdLine)[1]
             if "<SegmentTemplate" in mpdLine: 
+                # TODO : Build initialization segment url
+                if 'initialization' in mpdLine:
+                    init_url_pattern = getAttrValue("initialization",mpdLine)
+                if 'media' in mpdLine:
+                    media_url_pattern = getAttrValue("media",mpdLine)
+                if 'startNumber' in mpdLine:
+                    segNumber = int(getAttrValue("startNumber",mpdLine))
+                else:
+                    segNumber = 1
                 if "timescale" in mpdLine:
                     timescale = int(getAttrValue("timescale",mpdLine))
                 else:
@@ -160,15 +174,25 @@ def parseMPDData(mpdLines,outputMode="log"):
                     r,
                     availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start,
                     )
+                if reprIdForURL:
+                    segment_url = media_url_pattern.replace("$Time$",str(t))
+                    segment_url = segment_url.replace("$Number$",str(segNumber))
+                    segment_url = segment_url.replace("$RepresentationID$",reprIdForURL)
+                    segment_url = os.path.join(baseUrl,segment_url)
+                    segment_url = "<!-- Segment url : %s  -->" % (segment_url) 
                 currentWallTime = availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start
                 inline = getInlineOutput(currentWallTime,mpdLine)
                 last_t = t + d
+                segNumber = segNumber + 1
             if outputMode == "log" and log: 
                 print(log)
             if outputMode == "inline":
                 if not inline:
                     inline = getInlineOutput(currentWallTime,mpdLine)
                 print(inline)
+                if reprIdForURL and segment_url:
+                    print(segment_url)
+                    segment_url = None
         except Exception as ex:
             raise Exception("Failed to parse line '%s'.l.%s - %s" % (mpdLine, sys.exc_info()[2].tb_lineno, ex))
 
@@ -180,14 +204,18 @@ def main():
     print("mpdtimeline.py::main - Begin.")
 
     outputMode = "log"
+
     if '-o' in sys.argv:
         outputMode = sys.argv[sys.argv.index('-o')+1]
 
+    if "-url" in sys.argv:
+        repr_id_for_url = sys.argv[sys.argv.index('-url')+1]
+
     if '-f' in sys.argv:
         mpdFilename = sys.argv[sys.argv.index('-f')+1]
-        parseMPDFile(mpdFilename,outputMode)
+        parseMPDFile(mpdFilename,outputMode,repr_id_for_url)
     else:
-        parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode)
+        parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode,repr_id_for_url)
  
     print("mpdtimeline.py::main - End.")
     return
