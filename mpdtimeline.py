@@ -204,6 +204,7 @@ def main():
     print("mpdtimeline.py::main - Begin.")
 
     outputMode = "log"
+    repr_id_for_url = None
 
     if '-o' in sys.argv:
         outputMode = sys.argv[sys.argv.index('-o')+1]
