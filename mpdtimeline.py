@@ -114,8 +114,12 @@ def parseMPDData(mpdLines,outputMode="log"):
             if "<AdaptationSet" in mpdLine: 
                 adaptationSetIndex = adaptationSetIndex + 1
             if "<SegmentTemplate" in mpdLine: 
-                timescale = int(getAttrValue("timescale",mpdLine))   
-                presentationTimeOffset =  int(getAttrValue("presentationTimeOffset",mpdLine))
+                timescale = int(getAttrValue("timescale",mpdLine))
+                if "presentationTimeOffset" in mpdLine:
+                    presentationTimeOffset =  int(getAttrValue("presentationTimeOffset",mpdLine))
+                else:
+                    #Shouldn't we raise an exception here ? 
+                    presentationTimeOffset = 0
                 last_t = presentationTimeOffset
                 log = "P%02d - AS%02d - SegmentTemplate: timescale:%s presentationTimeOffset:%s - %s (Wall:%s)" % (
                     periodIndex,
