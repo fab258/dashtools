@@ -9,6 +9,12 @@ $ python3 mpdtimeline.py -f filename.mpd
 pip install python-dateutil
 pip install isodate
 
+Essential info about mpd timing model :
+https://github.com/google/shaka-player/blob/master/docs/design/dash-manifests.md
+https://dashif-documents.azurewebsites.net/Guidelines-TimingModel/master/Guidelines-TimingModel.html
+
+
+TODO: support of suggestedPresentationDelay ? 
 
 """
 import os
@@ -21,14 +27,16 @@ import isodate
 
 def cleanmystring(s):
     """Return the string received in parameter with some leading and finishing characters deleted"""
-    s = re.sub("^[ \n\t|]*","",s)
-    s = re.sub("[ \n\t|]*$","",s)
+    #s = re.sub("^[ \n\t|]*","",s)
+    #s = re.sub("[ \n\t|]*$","",s)
+    s = re.sub("^[\n]*","",s)
+    s = re.sub("[\n]*$","",s)    
     return s
 
 def getAttrValue(attrName,line):
     return re.search('%s="([^\"]*)"' % attrName,line)[1]
 
-def parseMPDFile(mpdFilename):
+def parseMPDFile(mpdFilename,outputMode="log"):
     """
     Parse MPD data from a file
     File must be indented
@@ -39,47 +47,65 @@ def parseMPDFile(mpdFilename):
     l = f.readline()
     while l:
         l = cleanmystring(l)
-        if l != "":
-            mpdLines.append(l)
+        #if l != "":
+        #    mpdLines.append(l)
+        mpdLines.append(l)
         l = f.readline() 
     f.close()
 
-    parseMPDData(mpdLines)
+    parseMPDData(mpdLines,outputMode)
 
-def parseMPDData(mpdLines):
+def getInlineOutput(dt,s):
+    #return "%s; %s" % (dt.isoformat(timespec='microseconds'),s)
+    return "%s; %s" % (dt.strftime('%Y-%m-%d T %H:%M:%S.%f'),s)
+
+def parseMPDData(mpdLines,outputMode="log"):
     """
     Parse MPD Data receive in an array, one line per item
+
+        mpdLines - Array of lines from the mpd
+        outputMode - Outmode mode. log (default) or inline to add wall clock label to the mpd
+
     """
     availabilityStartTime = None
     periodIndex = -1
     adaptationSetIndex = -1
+    currentWallTime = datetime.datetime.now()    
     for mpdLine in mpdLines: 
         try:
             #print("mpdtimeline.py::main - '%s'" % (mpdLine))
+            log = None
+            inline = None
             if 'availabilityStartTime' in mpdLine : 
                 availabilityStartTime =  parser.parse(getAttrValue("availabilityStartTime",mpdLine))
-                print("G - Availibility start time - Zero point wall clock time : %s"  % (availabilityStartTime))
+                log = "G - Availibility start time - Zero point wall clock time : %s"  % (availabilityStartTime)
+                inline = getInlineOutput(availabilityStartTime,mpdLine)
+                currentWallTime = availabilityStartTime
             if "<Period" in mpdLine: 
                 periodIndex = periodIndex + 1
                 adaptationSetIndex = -1 
                 if "start" in mpdLine: 
                     period_start = isodate.parse_duration(getAttrValue("start",mpdLine))
-                    print("G - Period %s Start: %s - Wall: %s" % (periodIndex,period_start,availabilityStartTime+period_start))  
+                    log = "G - Period %s Start: %s - Wall: %s" % (periodIndex,period_start,availabilityStartTime+period_start) 
                 else: 
                     period_start = datetime.timedelta(0) # Should be the end of the previous period
-                    print("Period Start: %s - Wall: %s" % ("Not set",availabilityStartTime+period_start))  
+                    log = "Period Start: %s - Wall: %s" % ("Not set",availabilityStartTime+period_start)
+                inline = getInlineOutput(availabilityStartTime+period_start,mpdLine)
+                currentWallTime = availabilityStartTime+period_start
             if "<AdaptationSet" in mpdLine: 
                 adaptationSetIndex = adaptationSetIndex + 1
             if "<SegmentTemplate" in mpdLine: 
                 timescale = int(getAttrValue("timescale",mpdLine))   
                 presentationTimeOffset =  int(getAttrValue("presentationTimeOffset",mpdLine))
                 last_t = presentationTimeOffset
-                print("P%02d - AS%02d - SegmentTemplate: timescale:%s presentationTimeOffset:%s - %s (Wall:%s)" % (
+                log = "P%02d - AS%02d - SegmentTemplate: timescale:%s presentationTimeOffset:%s - %s (Wall:%s)" % (
                     periodIndex,
                     adaptationSetIndex,
                     timescale,
                     presentationTimeOffset, datetime.timedelta(seconds=presentationTimeOffset/timescale),
-                    availabilityStartTime+datetime.timedelta(seconds=presentationTimeOffset/timescale)+period_start)) # This wall time doesn't mean something
+                    availabilityStartTime+datetime.timedelta(seconds=presentationTimeOffset/timescale)) 
+                currentWallTime = availabilityStartTime+datetime.timedelta(seconds=presentationTimeOffset/timescale)
+                inline = getInlineOutput(currentWallTime,mpdLine)
             if "<S " in mpdLine:
                 t = 0
                 d = -1
@@ -92,15 +118,23 @@ def parseMPDData(mpdLines):
                     d = int(getAttrValue("d",mpdLine))
                 if ' r="' in mpdLine:  
                     r = int(getAttrValue("r",mpdLine))
-                print("P%02d - AS%02d - Segment: t:%s - %s d:%s - %s r:%d Wall:%s" % (
+                log = "P%02d - AS%02d - Segment: t:%s - %s d:%s - %s r:%d Wall:%s" % (
                     periodIndex,
                     adaptationSetIndex,
                     t,datetime.timedelta(seconds=t/timescale),
                     d,datetime.timedelta(seconds=d/timescale),
                     r,
                     availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start,
-                    ))
+                    )
+                currentWallTime = availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start
+                inline = getInlineOutput(currentWallTime,mpdLine)
                 last_t = t + d
+            if outputMode == "log" and log: 
+                print(log)
+            if outputMode == "inline":
+                if not inline:
+                    inline = getInlineOutput(currentWallTime,mpdLine)
+                print(inline)
         except Exception as ex:
             raise Exception("Failed to parse line '%s'.l.%s - %s" % (mpdLine, sys.exc_info()[2].tb_lineno, ex))
 
@@ -111,9 +145,13 @@ def main():
     """
     print("mpdtimeline.py::main - Begin.")
 
+    outputMode = "log"
+    if '-o' in sys.argv:
+        outputMode = sys.argv[sys.argv.index('-o')+1]
+
     if '-f' in sys.argv:
         mpdFilename = sys.argv[sys.argv.index('-f')+1]
-        parseMPDFile(mpdFilename)
+        parseMPDFile(mpdFilename,outputMode)
  
     print("mpdtimeline.py::main - End.")
     return
