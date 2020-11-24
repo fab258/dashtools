@@ -24,10 +24,10 @@ TODO: support of suggestedPresentationDelay ?
 import os
 import sys
 import re
-import urllib.request
 import datetime
 from dateutil import parser,relativedelta
 import isodate
+import requests
 
 def cleanmystring(s):
     """Return the string received in parameter with some leading and finishing characters deleted"""
@@ -56,6 +56,21 @@ def parseMPDFile(mpdFilename,outputMode="log",reprIdForURL=None):
         mpdLines.append(l)
         l = f.readline() 
     f.close()
+
+    parseMPDData(mpdLines,outputMode)
+
+def parseMpdUrl(mpdUrl,outputMode="log",reprIdForURL=None):
+    """
+    Parse MPD data from an HTTP end point
+    manifest must be indented
+    """
+    print("mpdtimeline.py::main - Get '%s'" % (mpdUrl))
+
+    r = requests.get(mpdUrl,
+        verify=False)
+    if r.status_code != 200:
+        raise Exception("Failed to download manifest. %s - %s" % (path,r.status_code,r.text))
+    mpdLines = [str(k,'utf-8') for k in r.iter_lines() if k]
 
     parseMPDData(mpdLines,outputMode)
 
@@ -215,6 +230,9 @@ def main():
     if '-f' in sys.argv:
         mpdFilename = sys.argv[sys.argv.index('-f')+1]
         parseMPDFile(mpdFilename,outputMode,repr_id_for_url)
+    elif '-http' in sys.argv:
+        mpdUrl = sys.argv[sys.argv.index('-http')+1]
+        parseMpdUrl(mpdUrl,outputMode,repr_id_for_url)
     else:
         parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode,repr_id_for_url)
  
