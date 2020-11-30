@@ -113,11 +113,17 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
     timescale = 1 # Missing timescale should not happen on a real stream, so possibly let the error if not found ? 
     segment_url = None
     baseUrl = ""
+    # object to print the summary at the end 
+    periods = {} # Key: Period start line number
+    lineIndex = 0
+    currentPeriodKey = None
+    currentSegmentTimelineKey = None
     for mpdLine in expandRepetition(mpdLines): 
         try:
             #print("mpdtimeline.py::main - '%s'" % (mpdLine))
             log = None
             inline = None
+            lineIndex = lineIndex + 1
             if 'availabilityStartTime' in mpdLine : 
                 availabilityStartTime =  parser.parse(getAttrValue("availabilityStartTime",mpdLine))
                 log = "G - Availibility start time - Zero point wall clock time : %s"  % (availabilityStartTime)
@@ -134,10 +140,13 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
                     log = "Period Start: %s - Wall: %s" % ("Not set",availabilityStartTime+period_start)
                 inline = getInlineOutput(availabilityStartTime+period_start,mpdLine)
                 currentWallTime = availabilityStartTime+period_start
+                currentPeriodKey = lineIndex
+                periods[currentPeriodKey] = {"start":currentWallTime,"segmentTimelines":{}}
             if "<AdaptationSet" in mpdLine: 
                 adaptationSetIndex = adaptationSetIndex + 1
             if "<BaseURL" in mpdLine:
                 baseUrl = re.search (r"<BaseURL>(.*)<\/BaseURL",mpdLine)[1]
+
             if "<SegmentTemplate" in mpdLine: 
                 # TODO : Build initialization segment url
                 if 'initialization' in mpdLine:
@@ -196,9 +205,16 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
                     segment_url = os.path.join(baseUrl,segment_url)
                     segment_url = "<!-- Segment url : %s  -->" % (segment_url) 
                 currentWallTime = availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start
+                if currentSegmentTimelineKey:
+                    if not "start" in periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey].keys():
+                        periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey] ["start"] = currentWallTime    
+                    periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey] ["stop"] = currentWallTime + datetime.timedelta(seconds=d/timescale)
                 inline = getInlineOutput(currentWallTime,mpdLine)
                 last_t = t + d
                 segNumber = segNumber + 1
+            if '<SegmentTimeline' in mpdLine:
+                currentSegmentTimelineKey = lineIndex
+                periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey] = {}
             if outputMode == "log" and log: 
                 print(log)
             if outputMode == "inline":
@@ -210,7 +226,15 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
                     segment_url = None
         except Exception as ex:
             raise Exception("Failed to parse line '%s'.l.%s - %s" % (mpdLine, sys.exc_info()[2].tb_lineno, ex))
-
+    if True: 
+        # Print sumary 
+        print("##\n## Summary ##\n##")
+        for (period_line,period) in periods.items():
+            print("l:%d - Period starting at %s" % (period_line,period["start"]))
+            for (segmentTimeline_line,segmentTimeline) in period["segmentTimelines"].items():
+                print("    l.%d - SegmentTimeline from %s to %s" % (segmentTimeline_line,
+                                                                segmentTimeline["start"],
+                                                                segmentTimeline["stop"]))
 
 def main():
     """
