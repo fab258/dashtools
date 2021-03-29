@@ -28,6 +28,7 @@ import datetime
 from dateutil import parser,relativedelta
 import isodate
 import requests
+from urllib.parse import urljoin
 
 def cleanmystring(s):
     """Return the string received in parameter with some leading and finishing characters deleted"""
@@ -40,7 +41,7 @@ def cleanmystring(s):
 def getAttrValue(attrName,line):
     return re.search('%s="([^\"]*)"' % attrName,line)[1]
 
-def parseMPDFile(mpdFilename,outputMode="log",reprIdForURL=None):
+def parseMPDFile(mpdFilename,outputMode="log"):
     """
     Parse MPD data from a file
     File must be indented
@@ -59,7 +60,7 @@ def parseMPDFile(mpdFilename,outputMode="log",reprIdForURL=None):
 
     parseMPDData(mpdLines,outputMode)
 
-def parseMpdUrl(mpdUrl,outputMode="log",reprIdForURL=None):
+def parseMpdUrl(mpdUrl,outputMode="log"):
     """
     Parse MPD data from an HTTP end point
     manifest must be indented
@@ -97,16 +98,16 @@ def expandRepetition(mpdLines):
             mpdLinesExpanded.append(mpdLine)
     return mpdLinesExpanded
 
-def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
+def parseMPDData(mpdLines,outputMode="log",hostUrl=""):
     """
     Parse MPD Data receive in an array, one line per item
 
         mpdLines - Array of lines from the mpd
         outputMode - Outmode mode. log (default) or inline to add wall clock label to the mpd
-        reprIdForURL - string - If not None then the output will include the segment url based on this RepresentationID
+        hostUrl - string. To build full URL of segment 
 
     """
-    availabilityStartTime = None
+    availabilityStartTime = datetime.datetime.now() # Ok ? 
     periodIndex = -1
     adaptationSetIndex = -1
     currentWallTime = datetime.datetime.now()    
@@ -116,6 +117,7 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
     # object to print the summary at the end 
     periods = {} # Key: Period start line number
     lineIndex = 0
+    init_url_pattern = None 
     currentPeriodKey = None
     currentSegmentTimelineKey = None
     for mpdLine in expandRepetition(mpdLines): 
@@ -198,12 +200,13 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
                     r,
                     availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start,
                     )
-                if reprIdForURL:
-                    segment_url = media_url_pattern.replace("$Time$",str(t))
-                    segment_url = segment_url.replace("$Number$",str(segNumber))
-                    segment_url = segment_url.replace("$RepresentationID$",reprIdForURL)
-                    segment_url = os.path.join(baseUrl,segment_url)
-                    segment_url = "<!-- Segment url : %s  -->" % (segment_url) 
+                
+                segment_url = media_url_pattern.replace("$Time$",str(t))
+                segment_url = segment_url.replace("$Number$",str(segNumber))
+                segment_url = os.path.join(baseUrl,segment_url)
+                periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey]["segments"].append(segment_url)
+                segment_url = "<!-- Segment url : %s  -->" % (segment_url) 
+                
                 currentWallTime = availabilityStartTime+datetime.timedelta(seconds=((t-presentationTimeOffset)/timescale))+period_start
                 if currentSegmentTimelineKey:
                     if not "start" in periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey].keys():
@@ -215,13 +218,23 @@ def parseMPDData(mpdLines,outputMode="log",reprIdForURL=None):
             if '<SegmentTimeline' in mpdLine:
                 currentSegmentTimelineKey = lineIndex
                 periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey] = {}
+                periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey]["segments"] = []
+            if "<Representation" in mpdLine: 
+                reprId = getAttrValue("id",mpdLine)
+                print("New representation: '%s'" % (reprId))
+                big_wget = ""
+                if init_url_pattern:
+                    init_url = init_url_pattern.replace("$RepresentationID$",reprId)
+                    print("Init - %s - %s" % (reprId,urljoin(hostUrl,init_url)))
+                for sUrl in periods[currentPeriodKey]["segmentTimelines"][currentSegmentTimelineKey]["segments"]:
+                    print("Segment - %s - %s" % (reprId,urljoin(hostUrl,sUrl.replace("$RepresentationID$",reprId))))
             if outputMode == "log" and log: 
                 print(log)
             if outputMode == "inline":
                 if not inline:
                     inline = getInlineOutput(currentWallTime,mpdLine)
                 print(inline)
-                if reprIdForURL and segment_url:
+                if segment_url:
                     print(segment_url)
                     segment_url = None
         except Exception as ex:
@@ -243,22 +256,22 @@ def main():
     print("mpdtimeline.py::main - Begin.")
 
     outputMode = "log"
-    repr_id_for_url = None
+    hostUrl = None
 
     if '-o' in sys.argv:
         outputMode = sys.argv[sys.argv.index('-o')+1]
 
-    if "-url" in sys.argv:
-        repr_id_for_url = sys.argv[sys.argv.index('-url')+1]
+    if '-host' in sys.argv:
+        hostUrl = sys.argv[sys.argv.index('-host')+1]
 
     if '-f' in sys.argv:
         mpdFilename = sys.argv[sys.argv.index('-f')+1]
-        parseMPDFile(mpdFilename,outputMode,repr_id_for_url)
+        parseMPDFile(mpdFilename,outputMode)
     elif '-http' in sys.argv:
         mpdUrl = sys.argv[sys.argv.index('-http')+1]
-        parseMpdUrl(mpdUrl,outputMode,repr_id_for_url)
+        parseMpdUrl(mpdUrl,outputMode)
     else:
-        parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode,repr_id_for_url)
+        parseMPDData([cleanmystring(k) for k in sys.stdin],outputMode,hostUrl)
  
     print("mpdtimeline.py::main - End.")
     return
